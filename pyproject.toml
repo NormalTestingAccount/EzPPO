@@ -12,7 +12,7 @@ dependencies = [
     "gymnasium",
     "numpy",
 ]
-
+readme = "README.md"
 [project.optional-dependencies]
 dev = [
     "pytest",
