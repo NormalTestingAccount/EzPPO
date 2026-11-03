@@ -1,0 +1,27 @@
+# Virtual environments
+.venv/
+venv/
+env/
+ppoVenv/
+testingVenv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Checkpoints
+checkpoints/
+
+# Old files backup
+old/
