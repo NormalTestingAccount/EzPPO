@@ -98,10 +98,80 @@ def test_continuous_agent():
     print("  ContinuousPPOAgent: OK\n")
 
 
+def test_discrete_agent_multi_env():
+    print("=== Testing DiscretePPOAgent (multi-env) ===")
+    num_envs = 4
+    agent = DiscretePPOAgent(state_dim=4, action_dim=2, num_envs=num_envs, device="cpu")
+    
+    # Test batched act
+    states = np.random.randn(num_envs, 4).astype(np.float32)
+    actions, log_probs = agent.act(states)
+    assert actions.shape == (num_envs,), f"Expected {(num_envs,)}, got {actions.shape}"
+    assert log_probs.shape == (num_envs,), f"Expected {(num_envs,)}, got {log_probs.shape}"
+    print(f"  Batched act: actions={actions.shape}, log_probs={log_probs.shape} OK")
+    
+    # Test single state expansion
+    single_state = np.random.randn(4).astype(np.float32)
+    actions_exp, log_probs_exp = agent.act(single_state)
+    assert actions_exp.shape == (num_envs,), f"Expected {(num_envs,)}, got {actions_exp.shape}"
+    print(f"  Single state expansion: {actions_exp.shape} OK")
+    
+    # Test storing and training with batched data
+    for _ in range(64):
+        states = np.random.randn(num_envs, 4).astype(np.float32)
+        actions, log_probs = agent.act(states)
+        next_states = np.random.randn(num_envs, 4).astype(np.float32)
+        rewards = np.random.randn(num_envs).astype(np.float32) * 0.1
+        terminateds = np.zeros(num_envs, dtype=np.int32)
+        agent.store((states, actions.numpy(), rewards, log_probs.numpy(), next_states, terminateds))
+    
+    print(f"  Trajectory size: {len(agent.trajectory)} OK")
+    agent.train(num_epochs=2, batch_size=32)
+    print(f"  Training: OK")
+    agent.clear()
+    print("  DiscretePPOAgent (multi-env): OK\n")
+
+
+def test_continuous_agent_multi_env():
+    print("=== Testing ContinuousPPOAgent (multi-env) ===")
+    num_envs = 4
+    agent = ContinuousPPOAgent(state_dim=3, action_dim=1, num_envs=num_envs, device="cpu")
+    
+    # Test batched act
+    states = np.random.randn(num_envs, 3).astype(np.float32)
+    actions, log_probs, raw_actions = agent.act(states)
+    assert actions.shape == (num_envs, 1), f"Expected {(num_envs, 1)}, got {actions.shape}"
+    assert log_probs.shape == (num_envs,), f"Expected {(num_envs,)}, got {log_probs.shape}"
+    print(f"  Batched act: actions={actions.shape}, log_probs={log_probs.shape} OK")
+    
+    # Test single state expansion
+    single_state = np.random.randn(3).astype(np.float32)
+    actions_exp, log_probs_exp, raw_exp = agent.act(single_state)
+    assert actions_exp.shape == (num_envs, 1), f"Expected {(num_envs, 1)}, got {actions_exp.shape}"
+    print(f"  Single state expansion: {actions_exp.shape} OK")
+    
+    # Test storing and training with batched data
+    for _ in range(64):
+        states = np.random.randn(num_envs, 3).astype(np.float32)
+        actions, log_probs, raw_actions = agent.act(states)
+        next_states = np.random.randn(num_envs, 3).astype(np.float32)
+        rewards = np.random.randn(num_envs).astype(np.float32) * 0.1
+        terminateds = np.zeros(num_envs, dtype=np.int32)
+        agent.store((states, raw_actions.numpy(), rewards, log_probs.numpy(), next_states, terminateds))
+    
+    print(f"  Trajectory size: {len(agent.trajectory)} OK")
+    agent.train(num_epochs=2, batch_size=32)
+    print(f"  Training: OK")
+    agent.clear()
+    print("  ContinuousPPOAgent (multi-env): OK\n")
+
+
 if __name__ == "__main__":
     print("EzPPO Test Suite\n")
     test_discrete_network()
     test_continuous_network()
     test_discrete_agent()
     test_continuous_agent()
+    test_discrete_agent_multi_env()
+    test_continuous_agent_multi_env()
     print("All tests passed!")
