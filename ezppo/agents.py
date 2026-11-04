@@ -226,10 +226,10 @@ class BasePPOAgent:
         if self.obs_normalizer is not None:
             self.obs_normalizer.update(states.cpu().detach())
 
-        # Move back to CPU
-        self.network.to("cpu")
+        # Move back to the agent's device
+        self.network.to(self.device)
         if self.obs_normalizer is not None:
-            self.obs_normalizer.to("cpu")
+            self.obs_normalizer.to(self.device)
 
         # Log
         if num_updates > 0:
