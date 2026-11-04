@@ -80,19 +80,20 @@ class BasePPOAgent:
             advantages: [T, B] or [T]
             critic_targets: [T, B] or [T] - advantages + values (for critic loss)
         """
-        # Handle both single-env [T] and multi-env [T, B] cases
         if rewards.ndim == 1:
+            # Single environment: [T]
             T = rewards.shape[0]
             advantages = torch.zeros(T, device=self.device)
-            last_advantage = 0
+            last_advantage = 0.0
             for t in reversed(range(T)):
                 td_error = rewards[t] + self.gamma * next_values[t] * terminal_mask[t] - values[t]
                 last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * terminal_mask[t]
                 advantages[t] = last_advantage
         else:
+            # Multi-environment: [T, B]
             T, B = rewards.shape
             advantages = torch.zeros(T, B, device=self.device)
-            last_advantage = 0
+            last_advantage = torch.zeros(B, device=self.device)
             for t in reversed(range(T)):
                 td_error = rewards[t] + self.gamma * next_values[t] * terminal_mask[t] - values[t]
                 last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * terminal_mask[t]
@@ -130,9 +131,9 @@ class BasePPOAgent:
         next_states = torch.from_numpy(np.stack(next_states)).float().to(self.device)
         terminateds = torch.from_numpy(np.stack(terminateds)).float().to(self.device)
 
-        # Ensure consistent shapes
+        # Ensure consistent [T, B] shapes
         # For single env, stacking gives [T], [T, obs_dim] etc.
-        # We want [T, B] for scalar tensors and [T, B, obs_dim] for state tensors
+        # For multi env, stacking gives [T, num_envs], [T, num_envs, obs_dim] etc.
         if rewards.ndim == 1:
             # Single environment case
             rewards = rewards.unsqueeze(1)      # [T, 1]
@@ -306,14 +307,22 @@ class DiscretePPOAgent(BasePPOAgent):
         Select an action (stochastic).
         
         Args:
-            state: Observation (numpy array or tensor).
+            state: Observation. Single env: [obs_dim] or [1, obs_dim].
+                   Multi env: [num_envs, obs_dim].
             
         Returns:
-            (action, log_prob)
+            (action, log_prob) - both shaped [num_envs] if batched, else scalar
         """
         state = torch.as_tensor(state, dtype=torch.float32)
         if state.dim() == 1:
-            state = state.unsqueeze(0)
+            state = state.unsqueeze(0)        # [1, obs_dim]
+        # Expand single state to match num_envs, or validate batch size
+        if state.shape[0] == 1 and self._num_envs > 1:
+            state = state.expand(self._num_envs, -1)  # [num_envs, obs_dim]
+        elif state.shape[0] != self._num_envs:
+            raise ValueError(
+                f"Expected {self._num_envs} states, got {state.shape[0]}"
+            )
         if self.normalize_observations:
             state = self.obs_normalizer.normalize(state).to(self.device)
         else:
@@ -322,23 +331,37 @@ class DiscretePPOAgent(BasePPOAgent):
         logits = self.network(state)
         dist = Categorical(logits=logits)
         action = dist.sample()
-        log_prob = dist.log_prob(action.squeeze(0))
+        log_prob = dist.log_prob(action)
 
-        return action.squeeze(0).cpu().detach(), log_prob.cpu().detach()
+        # Remove batch dim if single env
+        if self._num_envs == 1:
+            return action.squeeze(0).cpu().detach(), log_prob.squeeze(0).cpu().detach()
+        return action.cpu().detach(), log_prob.cpu().detach()
 
-    def act_deterministic(self, state) -> int:
+    def act_deterministic(self, state):
         """Select action greedily (no sampling)."""
         state = torch.as_tensor(state, dtype=torch.float32)
         if state.dim() == 1:
-            state = state.unsqueeze(0)
+            state = state.unsqueeze(0)        # [1, obs_dim]
+        # Expand single state to match num_envs, or validate batch size
+        if state.shape[0] == 1 and self._num_envs > 1:
+            state = state.expand(self._num_envs, -1)  # [num_envs, obs_dim]
+        elif state.shape[0] != self._num_envs:
+            raise ValueError(
+                f"Expected {self._num_envs} states, got {state.shape[0]}"
+            )
         if self.normalize_observations:
             state = self.obs_normalizer.normalize(state).to(self.device)
         else:
             state = state.to(self.device)
 
         logits = self.network(state)
-        action = logits.argmax(dim=-1).squeeze(0)
-        return action.cpu().detach().item()
+        action = logits.argmax(dim=-1)
+
+        # Return scalar for single env, array for multi env
+        if self._num_envs == 1:
+            return action.squeeze(0).cpu().detach().item()
+        return action.cpu().detach().tolist()
 
     def _get_log_prob_and_entropy(self, states, actions):
         """Compute log probability and entropy for a batch."""
@@ -401,17 +424,23 @@ class ContinuousPPOAgent(BasePPOAgent):
         Select an action (stochastic, with tanh squashing).
         
         Args:
-            state: Observation (numpy array or tensor).
+            state: Observation. Single env: [obs_dim] or [1, obs_dim].
+                   Multi env: [num_envs, obs_dim].
             
         Returns:
-            (action, log_prob, raw_action)
-            - action: Clamped to [-1, 1]
-            - log_prob: Corrected for tanh squashing
-            - raw_action: Unsquashed Gaussian sample
+            (action, log_prob, raw_action) - shaped [num_envs, action_dim] etc.
+            Returns scalars/1-dim if _num_envs=1, otherwise arrays.
         """
         state = torch.as_tensor(state, dtype=torch.float32)
         if state.dim() == 1:
-            state = state.unsqueeze(0)
+            state = state.unsqueeze(0)        # [1, obs_dim]
+        # Expand single state to match num_envs, or validate batch size
+        if state.shape[0] == 1 and self._num_envs > 1:
+            state = state.expand(self._num_envs, -1)  # [num_envs, obs_dim]
+        elif state.shape[0] != self._num_envs:
+            raise ValueError(
+                f"Expected {self._num_envs} states, got {state.shape[0]}"
+            )
         if self.normalize_observations:
             state = self.obs_normalizer.normalize(state).to(self.device)
         else:
@@ -430,9 +459,11 @@ class ContinuousPPOAgent(BasePPOAgent):
             1 - action ** 2 + 1e-6
         )).sum(-1)
 
-        return action.squeeze(0).cpu().detach(), \
-               log_prob.cpu().detach(), \
-               raw_action.squeeze(0).cpu().detach()
+        if self._num_envs == 1:
+            return action.squeeze(0).cpu().detach(), \
+                   log_prob.cpu().detach(), \
+                   raw_action.squeeze(0).cpu().detach()
+        return action.cpu().detach(), log_prob.cpu().detach(), raw_action.cpu().detach()
 
     def act_deterministic(self, state) -> tuple:
         """
@@ -441,7 +472,14 @@ class ContinuousPPOAgent(BasePPOAgent):
         """
         state = torch.as_tensor(state, dtype=torch.float32)
         if state.dim() == 1:
-            state = state.unsqueeze(0)
+            state = state.unsqueeze(0)        # [1, obs_dim]
+        # Expand single state to match num_envs, or validate batch size
+        if state.shape[0] == 1 and self._num_envs > 1:
+            state = state.expand(self._num_envs, -1)  # [num_envs, obs_dim]
+        elif state.shape[0] != self._num_envs:
+            raise ValueError(
+                f"Expected {self._num_envs} states, got {state.shape[0]}"
+            )
         if self.normalize_observations:
             state = self.obs_normalizer.normalize(state).to(self.device)
         else:
@@ -453,9 +491,11 @@ class ContinuousPPOAgent(BasePPOAgent):
         log_prob = torch.zeros(mean.shape[0], device=self.device)
         raw_action = torch.zeros(mean.shape[0], device=self.device)
 
-        return action.squeeze(0).cpu().detach(), \
-               log_prob.cpu().detach(), \
-               raw_action.cpu().detach()
+        if self._num_envs == 1:
+            return action.squeeze(0).cpu().detach(), \
+                   log_prob.cpu().detach(), \
+                   raw_action.cpu().detach()
+        return action.cpu().detach(), log_prob.cpu().detach(), raw_action.cpu().detach()
 
     def _get_log_prob_and_entropy(self, states, raw_actions):
         """Compute log probability and entropy for a batch of raw actions."""
