@@ -65,6 +65,7 @@ def main():
         done = False
         steps = 0
         while not done:
+            print(agent.act(state))
             action = agent.act_deterministic(state)
             state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated

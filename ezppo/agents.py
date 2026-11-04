@@ -124,13 +124,25 @@ class BasePPOAgent:
         states, actions, rewards, old_log_probs, next_states, terminateds = zip(*self.trajectory)
 
         # Convert to tensors
-        states = torch.from_numpy(np.stack(states)).float().to(self.device)
-        actions = torch.from_numpy(np.stack(actions)).float().to(self.device)
-        rewards = torch.from_numpy(np.stack(rewards)).float().to(self.device)
-        old_log_probs = torch.from_numpy(np.stack(old_log_probs)).float().to(self.device)
-        next_states = torch.from_numpy(np.stack(next_states)).float().to(self.device)
-        terminateds = torch.from_numpy(np.stack(terminateds)).float().to(self.device)
+        states_np = np.stack(states)
+        actions_np = np.stack(actions)
+        rewards_np = np.stack(rewards)
+        old_log_probs_np = np.stack(old_log_probs)
+        next_states_np = np.stack(next_states)
+        terminateds_np = np.stack(terminateds)
 
+        # Handle discrete state spaces (integer IDs -> one-hot)
+        # For discrete envs like CliffWalking, states are integer IDs (0-d or scalar states)
+        if states_np.ndim == 1 and states_np.dtype in (np.int64, np.int32, np.int16, np.int8):
+            states = torch.nn.functional.one_hot(torch.from_numpy(states_np).long(), self.network.input_dim).float().to(self.device)
+            next_states = torch.nn.functional.one_hot(torch.from_numpy(next_states_np).long(), self.network.input_dim).float().to(self.device)
+        else:
+            states = torch.from_numpy(states_np).float().to(self.device)
+            next_states = torch.from_numpy(next_states_np).float().to(self.device)
+        actions = torch.from_numpy(actions_np).float().to(self.device)
+        rewards = torch.from_numpy(rewards_np).float().to(self.device)
+        old_log_probs = torch.from_numpy(old_log_probs_np).float().to(self.device)
+        terminateds = torch.from_numpy(terminateds_np).float().to(self.device)
         # Ensure consistent [T, B] shapes
         # For single env, stacking gives [T], [T, obs_dim] etc.
         # For multi env, stacking gives [T, num_envs], [T, num_envs, obs_dim] etc.
@@ -314,6 +326,9 @@ class DiscretePPOAgent(BasePPOAgent):
             (action, log_prob) - both shaped [num_envs] if batched, else scalar
         """
         state = torch.as_tensor(state, dtype=torch.float32)
+        # Handle 0-d (scalar) or 1-d states: add batch dim
+        if state.dim() == 0:
+            state = state.unsqueeze(0)        # [1]
         if state.dim() == 1:
             state = state.unsqueeze(0)        # [1, obs_dim]
         # Expand single state to match num_envs, or validate batch size
@@ -341,6 +356,9 @@ class DiscretePPOAgent(BasePPOAgent):
     def act_deterministic(self, state):
         """Select action greedily (no sampling)."""
         state = torch.as_tensor(state, dtype=torch.float32)
+        # Handle 0-d (scalar) or 1-d states: add batch dim
+        if state.dim() == 0:
+            state = state.unsqueeze(0)        # [1]
         if state.dim() == 1:
             state = state.unsqueeze(0)        # [1, obs_dim]
         # Expand single state to match num_envs, or validate batch size
@@ -432,6 +450,9 @@ class ContinuousPPOAgent(BasePPOAgent):
             Returns scalars/1-dim if _num_envs=1, otherwise arrays.
         """
         state = torch.as_tensor(state, dtype=torch.float32)
+        # Handle 0-d (scalar) or 1-d states: add batch dim
+        if state.dim() == 0:
+            state = state.unsqueeze(0)        # [1]
         if state.dim() == 1:
             state = state.unsqueeze(0)        # [1, obs_dim]
         # Expand single state to match num_envs, or validate batch size
@@ -471,6 +492,9 @@ class ContinuousPPOAgent(BasePPOAgent):
         Useful for evaluation.
         """
         state = torch.as_tensor(state, dtype=torch.float32)
+        # Handle 0-d (scalar) or 1-d states: add batch dim
+        if state.dim() == 0:
+            state = state.unsqueeze(0)        # [1]
         if state.dim() == 1:
             state = state.unsqueeze(0)        # [1, obs_dim]
         # Expand single state to match num_envs, or validate batch size

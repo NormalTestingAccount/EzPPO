@@ -9,7 +9,7 @@ from ezppo import DiscretePPOAgent
 
 
 def main():
-    env_id = "LunarLander-v2"
+    env_id = "LunarLander-v3"
     env = gym.make(env_id, render_mode="rgb_array")
 
     state_dim = env.observation_space.shape[0]
