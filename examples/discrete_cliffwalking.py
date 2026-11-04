@@ -3,10 +3,21 @@ Discrete PPO example: CliffWalking-v1
 
 Trains a PPO agent to find the shortest path from start to goal
 while avoiding the cliff edge.
+
+Note: CliffWalking uses integer state IDs (0-47). We pass state_dim=48
+to the agent so it knows the one-hot encoding size, and manually
+one-hot encode the state before calling act(). The agent's train()
+also handles one-hot encoding automatically.
 """
 
 import gymnasium as gym
+import torch
 from ezppo import DiscretePPOAgent
+
+
+def one_hot(state: int, num_classes: int) -> torch.Tensor:
+    """Convert integer state to one-hot vector."""
+    return torch.nn.functional.one_hot(torch.tensor(state), num_classes).float()
 
 
 def main():
@@ -52,12 +63,15 @@ def main():
         done = False
 
         while not done:
-            action, log_prob = agent.act(state)
+            # One-hot encode discrete state ID
+            state_vec = one_hot(state, state_dim)
+            action, log_prob = agent.act(state_vec)
             next_state, reward, terminated, truncated, info = env.step(action.item())
             done = terminated or truncated
             total_reward += reward
 
-            agent.store((state, action.item(), reward, log_prob.item(), next_state, terminated))
+            agent.store((state_vec.numpy(), action.item(), reward, log_prob.item(),
+                         one_hot(next_state, state_dim).numpy(), terminated))
             state = next_state
 
         # Train when trajectory is full
@@ -83,7 +97,8 @@ def main():
         total_reward = 0
         done = False
         while not done:
-            action = agent.act_deterministic(state)
+            state_vec = one_hot(state, state_dim)
+            action = agent.act_deterministic(state_vec)
             state, reward, terminated, truncated, info = eval_env.step(action)
             done = terminated or truncated
             total_reward += reward
