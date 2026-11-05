@@ -63,7 +63,7 @@ def main():
 
         # Train when trajectory is full
         if len(agent.trajectory) >= agent._trajectory_size:
-            agent.train()
+            agent.train(verbose=False)
             agent.clear()
 
         # Track best

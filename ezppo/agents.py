@@ -106,13 +106,14 @@ class BasePPOAgent:
         """Flatten [T, B, ...] to [T*B, ...] for batched training."""
         return [t.flatten(end_dim=1) for t in tensors]
 
-    def train(self, num_epochs=None, batch_size=None):
+    def train(self, num_epochs=None, batch_size=None, verbose=True):
         """
         Train PPO on the collected trajectory.
         
         Args:
             num_epochs: Number of PPO update epochs (uses default if None).
             batch_size: Mini-batch size for training (uses default if None).
+            verbose: If True, print loss/entropy after training (default True).
         """
         if not self.trajectory:
             return
@@ -245,7 +246,7 @@ class BasePPOAgent:
             self.obs_normalizer.to(self.device)
 
         # Log
-        if num_updates > 0:
+        if num_updates > 0 and verbose:
             print(f"[{type(self).__name__}] Policy: {avg_policy_loss/num_updates:.4f} | "
                   f"Critic: {avg_critic_loss/num_updates:.4f} | "
                   f"Entropy: {avg_entropy/num_updates:.4f}")
