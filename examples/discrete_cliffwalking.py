@@ -22,7 +22,7 @@ def one_hot(state: int, num_classes: int) -> torch.Tensor:
 
 def main():
     env_id = "CliffWalking-v1"
-    env = gym.make(env_id, render_mode="rgb_array")
+    env = gym.make(env_id, render_mode="human")
 
     state_dim = env.observation_space.n          # Discrete states (grid cells)
     action_dim = env.action_space.n               # 4 actions (up, down, left, right)

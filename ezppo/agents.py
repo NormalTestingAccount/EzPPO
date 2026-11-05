@@ -386,7 +386,8 @@ class DiscretePPOAgent(BasePPOAgent):
         logits = self.network(states)
         dist = Categorical(logits=logits)
         log_probs = dist.log_prob(actions)
-        entropies = dist.entropy().sum(-1)
+        # Categorical.entropy() returns [batch], NOT [batch, 1]
+        entropies = dist.entropy()
         return log_probs, entropies
 
 

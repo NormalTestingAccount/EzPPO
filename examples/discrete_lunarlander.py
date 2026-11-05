@@ -18,7 +18,14 @@ def main():
     print(f"Training on {env_id}")
     print(f"State dim: {state_dim}, Action dim: {action_dim}")
 
-    # Create agent with performant hyperparams
+    # Create agent with LunarLander-optimized hyperparams
+    # Key changes from CartPole defaults:
+    #   - higher entropy (more exploration)
+    #   - higher gamma (longer horizon)
+    #   - higher gae_lambda (lower variance)
+    #   - lower epsilon (more stable updates)
+    #   - larger trajectory (more diverse data)
+    #   - fewer epochs (less overfitting)
     agent = DiscretePPOAgent(
         state_dim=state_dim,
         action_dim=action_dim,
@@ -27,17 +34,17 @@ def main():
             "critic": [state_dim, 256, 256, 1]
         },
         lr=3e-4,
-        gamma=0.99,
-        gae_lambda=0.95,
-        epsilon=0.2,
+        gamma=0.995,
+        gae_lambda=0.98,
+        epsilon=0.1,
         critic_coef=0.5,
-        entropy_coef=0.001,
+        entropy_coef=0.01,
         num_envs=1,
-        trajectory_size=512,
-        device="cpu",
+        trajectory_size=2048,
+        device="cuda",
         normalize_observations=False,
-        default_num_epochs=10,
-        default_batch_size=64
+        default_num_epochs=4,
+        default_batch_size=128
     )
 
     # Training loop
