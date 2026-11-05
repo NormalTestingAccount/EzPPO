@@ -41,14 +41,14 @@ def main():
         entropy_coef=0.01,
         num_envs=1,
         trajectory_size=2048,
-        device="cuda",
+        device="cpu",
         normalize_observations=False,
         default_num_epochs=4,
         default_batch_size=128
     )
 
     # Training loop
-    max_episodes = 2000
+    max_episodes = 3000
     best_reward = -float("inf")
 
     for episode in range(max_episodes):
@@ -73,12 +73,16 @@ def main():
         if total_reward > best_reward:
             best_reward = total_reward
 
+            agent.save("checkpoints/lunarlander_ppo", None)
+            print("Checkpoint saved!")
+
         if (episode + 1) % 100 == 0:
             print(f"Episode {episode+1}/{max_episodes} | Reward: {total_reward:.1f} | Best: {best_reward:.1f}")
 
-    # Save checkpoint
-    agent.save("checkpoints/lunarlander_ppo", None)
-    print("Checkpoint saved!")
+    if total_reward > best_reward:
+        # Save checkpoint
+        agent.save("checkpoints/lunarlander_ppo", None)
+        print("Checkpoint saved!")
 
     # Evaluation
     print("\n--- Evaluation ---")

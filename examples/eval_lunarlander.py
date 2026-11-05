@@ -52,8 +52,8 @@ def main():
         total_reward = 0
         done = False
         while not done:
-            action = agent.act_deterministic(state)
-            state, reward, terminated, truncated, info = eval_env.step(action)
+            action, _ = agent.act(state)
+            state, reward, terminated, truncated, info = eval_env.step(action.tolist())
             done = terminated or truncated
             total_reward += reward
         print(f"Eval episode: {total_reward}")
