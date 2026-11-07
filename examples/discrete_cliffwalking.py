@@ -71,7 +71,7 @@ def main():
             total_reward += reward
 
             agent.store((state_vec.numpy(), action.item(), reward, log_prob.item(),
-                         one_hot(next_state, state_dim).numpy(), terminated))
+                         one_hot(next_state, state_dim).numpy(), terminated, truncated))
             state = next_state
 
         # Train when trajectory is full

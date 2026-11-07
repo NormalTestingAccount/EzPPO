@@ -66,6 +66,11 @@ examples/
 
 ## Training Loop Template
 
+Store both `terminated` and `truncated` in each transition. The agent bootstraps
+from `next_state` after truncation but stops GAE recursion at either episode
+boundary. For auto-reset vector environments, pass the final observation as
+`next_state` for a truncated transition rather than the reset observation.
+
 ```python
 trajectory = []
 max_trajectory = 2048
@@ -79,8 +84,8 @@ for episode in range(num_episodes):
         next_state, reward, terminated, truncated, _ = env.step(action.item())
         done = terminated or truncated
 
-        trajectory.append((state, action.item(), reward, log_prob.item(), 
-                           next_state, terminated))
+        trajectory.append((state, action.item(), reward, log_prob.item(),
+                           next_state, terminated, truncated))
         state = next_state
 
     if len(trajectory) >= max_trajectory:

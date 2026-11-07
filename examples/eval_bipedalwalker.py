@@ -66,6 +66,7 @@ def main():
         steps = 0
         while not done:
             action = agent.act_deterministic(state)[0]  # Deterministic action
+            #action,_,__ = agent.act(state)  # Stochastic action
             action_scaled = action * env.action_space.high[0]
             state, reward, terminated, truncated, info = env.step(action_scaled)
             done = terminated or truncated

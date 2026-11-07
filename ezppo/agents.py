@@ -58,23 +58,23 @@ class BasePPOAgent:
         self.network.to(self.device)
 
     def store(self, packet: tuple) -> None:
-        """Store a transition in the trajectory."""
+        """Store (state, action, reward, log_prob, next_state, terminated, truncated)."""
         self.trajectory.append(packet)
 
     def clear(self) -> None:
         """Clear the trajectory buffer."""
         self.trajectory = []
 
-    def _compute_gae(self, states, rewards, values, next_values, terminal_mask):
+    def _compute_gae(self, rewards, values, next_values, bootstrap_mask, gae_mask):
         """
         Compute Generalized Advantage Estimation (GAE).
         
         Args:
-            states: [T, B, obs_dim] or [T, obs_dim]
             rewards: [T, B] or [T]
             values: [T, B] or [T] - value of current states
             next_values: [T, B] or [T] - value of next states
-            terminal_mask: [T, B] or [T] - 0 if terminal, 1 if not
+            bootstrap_mask: [T, B] or [T] - 0 if terminated, 1 otherwise
+            gae_mask: [T, B] or [T] - 0 at episode boundaries, 1 otherwise
             
         Returns:
             advantages: [T, B] or [T]
@@ -86,8 +86,8 @@ class BasePPOAgent:
             advantages = torch.zeros(T, device=self.device)
             last_advantage = 0.0
             for t in reversed(range(T)):
-                td_error = rewards[t] + self.gamma * next_values[t] * terminal_mask[t] - values[t]
-                last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * terminal_mask[t]
+                td_error = rewards[t] + self.gamma * next_values[t] * bootstrap_mask[t] - values[t]
+                last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * gae_mask[t]
                 advantages[t] = last_advantage
         else:
             # Multi-environment: [T, B]
@@ -95,8 +95,8 @@ class BasePPOAgent:
             advantages = torch.zeros(T, B, device=self.device)
             last_advantage = torch.zeros(B, device=self.device)
             for t in reversed(range(T)):
-                td_error = rewards[t] + self.gamma * next_values[t] * terminal_mask[t] - values[t]
-                last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * terminal_mask[t]
+                td_error = rewards[t] + self.gamma * next_values[t] * bootstrap_mask[t] - values[t]
+                last_advantage = td_error + self.gamma * self.gae_lambda * last_advantage * gae_mask[t]
                 advantages[t] = last_advantage
 
         critic_targets = advantages + values
@@ -122,7 +122,9 @@ class BasePPOAgent:
         batch_size = batch_size if batch_size is not None else self.default_batch_size
 
         # Unpack trajectory
-        states, actions, rewards, old_log_probs, next_states, terminateds = zip(*self.trajectory)
+        states, actions, rewards, old_log_probs, next_states, terminateds, truncateds = zip(
+            *self.trajectory
+        )
 
         # Convert to tensors
         states_np = np.stack(states)
@@ -131,6 +133,7 @@ class BasePPOAgent:
         old_log_probs_np = np.stack(old_log_probs)
         next_states_np = np.stack(next_states)
         terminateds_np = np.stack(terminateds)
+        truncateds_np = np.stack(truncateds)
 
         # Handle discrete state spaces (integer IDs -> one-hot)
         # For discrete envs like CliffWalking, states are integer IDs (0-d or scalar states)
@@ -143,7 +146,8 @@ class BasePPOAgent:
         actions = torch.from_numpy(actions_np).float().to(self.device)
         rewards = torch.from_numpy(rewards_np).float().to(self.device)
         old_log_probs = torch.from_numpy(old_log_probs_np).float().to(self.device)
-        terminateds = torch.from_numpy(terminateds_np).float().to(self.device)
+        terminateds = torch.from_numpy(terminateds_np).bool().to(self.device)
+        truncateds = torch.from_numpy(truncateds_np).bool().to(self.device)
         # Ensure consistent [T, B] shapes
         # For single env, stacking gives [T], [T, obs_dim] etc.
         # For multi env, stacking gives [T, num_envs], [T, num_envs, obs_dim] etc.
@@ -152,13 +156,15 @@ class BasePPOAgent:
             rewards = rewards.unsqueeze(1)      # [T, 1]
             old_log_probs = old_log_probs.unsqueeze(1)  # [T, 1]
             terminateds = terminateds.unsqueeze(1)  # [T, 1]
+            truncateds = truncateds.unsqueeze(1)  # [T, 1]
             actions = actions.unsqueeze(1)      # [T, 1]
             if states.ndim == 2:
                 states = states.unsqueeze(1)    # [T, 1, obs_dim]
             if next_states.ndim == 2:
                 next_states = next_states.unsqueeze(1)  # [T, 1, obs_dim]
 
-        terminal_mask = (1 - terminateds).float()
+        bootstrap_mask = (~terminateds).float()
+        gae_mask = (~(terminateds | truncateds)).float()
 
         # Compute values
         values = self.network.predict_value(states).squeeze(-1)
@@ -166,7 +172,7 @@ class BasePPOAgent:
 
         # Compute GAE
         advantages, critic_targets = self._compute_gae(
-            states, rewards, values, next_values, terminal_mask
+            rewards, values, next_values, bootstrap_mask, gae_mask
         )
 
         # Normalize advantages
@@ -280,7 +286,7 @@ class DiscretePPOAgent(BasePPOAgent):
     Usage:
         agent = DiscretePPOAgent(state_dim=4, action_dim=2)
         action, log_prob = agent.act(state)
-        agent.store((state, action, reward, log_prob, next_state, terminated))
+        agent.store((state, action, reward, log_prob, next_state, terminated, truncated))
         agent.train()
     """
 
@@ -404,7 +410,7 @@ class ContinuousPPOAgent(BasePPOAgent):
     Usage:
         agent = ContinuousPPOAgent(state_dim=3, action_dim=1)
         action, log_prob, raw_action = agent.act(state)
-        agent.store((state, raw_action, reward, log_prob, next_state, terminated))
+        agent.store((state, raw_action, reward, log_prob, next_state, terminated, truncated))
         agent.train()
     """
 
@@ -484,7 +490,7 @@ class ContinuousPPOAgent(BasePPOAgent):
 
         if self._num_envs == 1:
             return action.squeeze(0).cpu().detach(), \
-                   log_prob.cpu().detach(), \
+                   log_prob.squeeze(0).cpu().detach(), \
                    raw_action.squeeze(0).cpu().detach()
         return action.cpu().detach(), log_prob.cpu().detach(), raw_action.cpu().detach()
 

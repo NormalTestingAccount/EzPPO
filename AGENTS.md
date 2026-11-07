@@ -45,6 +45,7 @@ examples/
   - All `act()`, `act_deterministic()`, `save()`, `load()`, `train()` methods must guard against `None`
 - **`load(model_path)`** — normalizer_path defaults to `None`; only loads normalizer if `obs_normalizer is not None`
 - GAE computation in `_compute_gae()`: supports both single-env `[T]` and multi-env `[T, B]` shapes
+- Trajectory transitions store both `terminated` and `truncated`; value bootstrapping stops only on termination, while GAE recursion stops on either episode boundary
 - Advantage normalization: `(adv - mean) / (std + 1e-8)` before training
 - Gradient clipping: `max_norm=0.5` on every step
 
@@ -91,7 +92,7 @@ for episode in range(max_episodes):
     while not done:
         action, log_prob = agent.act(state)
         next_state, reward, terminated, truncated, _ = env.step(...)
-        agent.store((state, action, reward, log_prob, next_state, terminated))
+        agent.store((state, action, reward, log_prob, next_state, terminated, truncated))
         state = next_state
     if len(agent.trajectory) >= agent._trajectory_size:
         agent.train()  # Uses defaults if not specified

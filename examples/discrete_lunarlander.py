@@ -62,7 +62,7 @@ def main():
             done = terminated or truncated
             total_reward += reward
 
-            agent.store((state, action.item(), reward, log_prob.item(), next_state, terminated))
+            agent.store((state, action.item(), reward, log_prob.item(), next_state, terminated, truncated))
             state = next_state
 
         # Train when trajectory is full
