@@ -1,48 +1,14 @@
 # EzPPO
 
-A simple, unified PPO (Proximal Policy Optimization) library for PyTorch. Supports both **discrete** and **continuous** action spaces.
+A simple, unified PPO (Proximal Policy Optimization) library for PyTorch that supports **discrete** and **continuous** action spaces.
 
 ## Features
 
-- **Unified API**: Same training loop for discrete and continuous
-- **Observation normalization**: Online running statistics
-- **GAE (Generalized Advantage Estimation)**: For stable advantage estimation
-- **Clipped surrogate objective**: Standard PPO clipping
-- **Mini-batch training**: With random shuffling
-- **Gradient clipping**: Prevents exploding gradients
-- **Checkpoint save/load**: Resume training easily
-- **Multi-environment support**: Parallel environments built-in
-- **GPU support**: Automatic device management
-
-## Quick Start
-
-### Discrete Actions (CartPole)
-
-```python
-from ezppo import DiscretePPOAgent
-import gymnasium as gym
-
-agent = DiscretePPOAgent(state_dim=4, action_dim=2)
-env = gym.make("CartPole-v1")
-
-state, _ = env.reset()
-action, log_prob = agent.act(state)  # Stochastic action
-# action = agent.act_deterministic(state)  # Greedy action (for eval)
-```
-
-### Continuous Actions (Pendulum)
-
-```python
-from ezppo import ContinuousPPOAgent
-import gymnasium as gym
-
-agent = ContinuousPPOAgent(state_dim=3, action_dim=1)
-env = gym.make("Pendulum-v1")
-
-state, _ = env.reset()
-action, log_prob, raw_action = agent.act(state)
-# action = agent.act_deterministic(state)[0]  # Mean action (for eval)
-```
+- PPO agents for discrete and continuous actions
+- Optional online observation normalization
+- Generalized Advantage Estimation (GAE)
+- Clipped surrogate objective, mini-batches, and gradient clipping
+- Checkpoint save/load and vector-environment support
 
 ## Installation
 
@@ -50,32 +16,24 @@ action, log_prob, raw_action = agent.act(state)
 pip install torch gymnasium numpy
 ```
 
-## Architecture
+Some environments require extra dependencies. For BipedalWalker, install
+`gymnasium[box2d]` and `swig`.
 
-```
-ezppo/
-├── __init__.py          # Public API
-├── networks.py          # DiscretePPO, ContinuousPPO, BasePPO
-├── normalizer.py        # RunningNormalizer
-└── agents.py            # DiscretePPOAgent, ContinuousPPOAgent
+## Training with one environment
 
-examples/
-├── discrete_cartpole.py
-└── continuous_pendulum.py
-```
-
-## Training Loop Template
-
-Store both `terminated` and `truncated` in each transition. The agent bootstraps
-from `next_state` after truncation but stops GAE recursion at either episode
-boundary. For auto-reset vector environments, pass the final observation as
-`next_state` for a truncated transition rather than the reset observation.
+### Discrete actions
 
 ```python
-trajectory = []
-max_trajectory = 2048
+import gymnasium as gym
+from ezppo import DiscretePPOAgent
 
-for episode in range(num_episodes):
+env = gym.make("CartPole-v1")
+agent = DiscretePPOAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.n,
+)
+
+for episode in range(1000):
     state, _ = env.reset()
     done = False
 
@@ -84,58 +42,224 @@ for episode in range(num_episodes):
         next_state, reward, terminated, truncated, _ = env.step(action.item())
         done = terminated or truncated
 
-        trajectory.append((state, action.item(), reward, log_prob.item(),
-                           next_state, terminated, truncated))
+        agent.store((
+            state, action.item(), reward, log_prob.item(), next_state,
+            terminated, truncated,
+        ))
         state = next_state
 
-    if len(trajectory) >= max_trajectory:
-        agent.train(num_epochs=4, batch_size=64)
-        trajectory.clear()
+    agent.train()
+    agent.clear()
+
+agent.save("checkpoints/cartpole_ppo", "checkpoints/cartpole_ppo_norm.npy")
 ```
 
-## API Reference
-
-### Networks
-
-| Class | Purpose |
-|-------|---------|
-| `BasePPO` | Base class with configurable architecture |
-| `DiscretePPO` | Discrete actions → logits output |
-| `ContinuousPPO` | Continuous actions → mean + learnable log_std |
-
-### Agents
-
-| Class | Purpose |
-|-------|---------|
-| `DiscretePPOAgent` | Discrete action space |
-| `ContinuousPPOAgent` | Continuous action space |
-
-### Key Methods
-
-**Agent.act(state)** → `(action, log_prob)` or `(action, log_prob, raw_action)`
-**Agent.act_deterministic(state)** → Deterministic action (for evaluation)
-**Agent.train(num_epochs=4, batch_size=64)** → Train on trajectory
-**Agent.store(packet)** → Add transition to trajectory
-**Agent.clear()** → Clear trajectory buffer
-**Agent.save(path)** → Save checkpoint
-**Agent.load(path)** → Load checkpoint
-
-## Configuration
+### Continuous actions
 
 ```python
-agent = DiscretePPOAgent(
-    state_dim=4, action_dim=2,
-    architecture={                    # Custom network architecture
-        "actor": [state_dim, 64, 64, action_dim],
-        "critic": [state_dim, 64, 64, 1]
-    },
-    lr=3e-4, gamma=0.99, 
-    gae_lambda=0.95, epsilon=0.2,
-    critic_coef=0.5, entropy_coef=0.01,
-    num_envs=1, trajectory_size=2048,
-    device="cpu"
+import gymnasium as gym
+from ezppo import ContinuousPPOAgent
+
+env = gym.make("Pendulum-v1")
+agent = ContinuousPPOAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.shape[0],
 )
+
+for episode in range(1000):
+    state, _ = env.reset()
+    done = False
+
+    while not done:
+        action, log_prob, raw_action = agent.act(state)
+        next_state, reward, terminated, truncated, _ = env.step(
+            action.numpy() * env.action_space.high
+        )
+        done = terminated or truncated
+
+        agent.store((
+            state, raw_action.numpy(), reward, log_prob.item(), next_state,
+            terminated, truncated,
+        ))
+        state = next_state
+
+    agent.train()
+    agent.clear()
+
+agent.save("checkpoints/pendulum_ppo", "checkpoints/pendulum_ppo_norm.npy")
 ```
+
+Store both `terminated` and `truncated` in every transition. PPO bootstraps
+through truncations using `next_state`, but stops GAE recursion at either
+episode boundary. For a regular, non-vector Gymnasium environment,
+`next_state` is the transition's final observation.
+
+## Training with multiple environments
+
+### Discrete actions
+
+```python
+import gymnasium as gym
+import numpy as np
+from gymnasium.vector import AsyncVectorEnv, AutoresetMode
+from ezppo import DiscretePPOAgent
+
+def make_env():
+    return gym.make("CartPole-v1")
+
+num_envs = 4
+envs = AsyncVectorEnv(
+    [make_env for _ in range(num_envs)],
+    autoreset_mode=AutoresetMode.SAME_STEP,
+)
+agent = DiscretePPOAgent(
+    state_dim=envs.single_observation_space.shape[0],
+    action_dim=envs.single_action_space.n,
+    num_envs=num_envs,
+)
+
+observations, _ = envs.reset()
+for _ in range(128):
+    actions, log_probs = agent.act(observations)
+    next_observations, rewards, terminated, truncated, infos = envs.step(
+        actions.numpy()
+    )
+
+    transition_next_observations = next_observations.copy()
+    if np.any(truncated):
+        transition_next_observations[truncated] = infos["final_obs"][truncated]
+
+    agent.store((
+        observations, actions.numpy(), rewards, log_probs.numpy(),
+        transition_next_observations, terminated, truncated,
+    ))
+    observations = next_observations
+
+agent.train()
+agent.clear()
+```
+
+### Continuous actions
+
+```python
+import gymnasium as gym
+import numpy as np
+from gymnasium.vector import AsyncVectorEnv, AutoresetMode
+from ezppo import ContinuousPPOAgent
+
+def make_env():
+    return gym.make("Pendulum-v1")
+
+num_envs = 4
+envs = AsyncVectorEnv(
+    [make_env for _ in range(num_envs)],
+    autoreset_mode=AutoresetMode.SAME_STEP,
+)
+agent = ContinuousPPOAgent(
+    state_dim=envs.single_observation_space.shape[0],
+    action_dim=envs.single_action_space.shape[0],
+    num_envs=num_envs,
+)
+
+observations, _ = envs.reset()
+for _ in range(128):
+    actions, log_probs, raw_actions = agent.act(observations)
+    next_observations, rewards, terminated, truncated, infos = envs.step(
+        actions.numpy() * 2
+    )
+
+    transition_next_observations = next_observations.copy()
+    if np.any(truncated):
+        transition_next_observations[truncated] = infos["final_obs"][truncated]
+
+    agent.store((
+        observations, raw_actions.numpy(), rewards, log_probs.numpy(),
+        transition_next_observations, terminated, truncated,
+    ))
+    observations = next_observations
+
+agent.train()
+agent.clear()
+```
+
+Each vector-environment step stores one transition per environment, so these
+examples collect `128 * num_envs` transitions. `SAME_STEP` autoreset returns
+the reset observation in `next_observations`; for truncated episodes, the
+examples replace it with `infos["final_obs"]` before storing so the value
+function bootstraps from the final observation.
+
+## Evaluation
+
+Use `act_deterministic()` for evaluation.
+
+### Discrete actions
+
+```python
+import gymnasium as gym
+from ezppo import DiscretePPOAgent
+
+env = gym.make("CartPole-v1")
+agent = DiscretePPOAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.n,
+)
+agent.load("checkpoints/cartpole_ppo", "checkpoints/cartpole_ppo_norm.npy")
+
+for episode in range(5):
+    state, _ = env.reset()
+    total_reward = 0
+    done = False
+
+    while not done:
+        action = agent.act_deterministic(state)
+        state, reward, terminated, truncated, _ = env.step(action)
+        done = terminated or truncated
+        total_reward += reward
+
+    print(f"Episode {episode + 1}: reward={total_reward:.1f}")
+```
+
+### Continuous actions
+
+```python
+import gymnasium as gym
+from ezppo import ContinuousPPOAgent
+
+env = gym.make("Pendulum-v1")
+agent = ContinuousPPOAgent(
+    state_dim=env.observation_space.shape[0],
+    action_dim=env.action_space.shape[0],
+)
+agent.load("checkpoints/pendulum_ppo", "checkpoints/pendulum_ppo_norm.npy")
+
+for episode in range(5):
+    state, _ = env.reset()
+    total_reward = 0
+    done = False
+
+    while not done:
+        action = agent.act_deterministic(state)[0]
+        state, reward, terminated, truncated, _ = env.step(
+            action.numpy() * env.action_space.high
+        )
+        done = terminated or truncated
+        total_reward += reward
+
+    print(f"Episode {episode + 1}: reward={total_reward:.1f}")
+```
+
+## API summary
+
+- `DiscretePPOAgent.act(state)` returns `(action, log_prob)`.
+- `ContinuousPPOAgent.act(state)` returns `(action, log_prob, raw_action)`.
+- For continuous PPO, pass the squashed `action` to the environment and store
+  `raw_action` in the transition.
+- Store transitions as
+  `(state, action, reward, log_prob, next_state, terminated, truncated)`.
+- `agent.train()` updates from stored transitions. Call `agent.clear()` before
+  collecting the next rollout.
+- `agent.save(model_path)` and `agent.load(model_path)` save and load weights.
+  Supply a normalizer path to both when observation normalization is enabled.
 
 ## License
 

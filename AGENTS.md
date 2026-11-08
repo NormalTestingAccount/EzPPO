@@ -23,9 +23,15 @@ ezppo/                    # Core library (installable package)
 
 examples/
 ├── discrete_cartpole.py          # Training example (CartPole-v1)
-├── continuous_pendulum.py        # Training example (Pendulum-v1)
+├── discrete_lunarlander.py       # Training example (LunarLander-v3)
+├── discrete_mountaincar.py       # Training example (MountainCar-v0)
+├── discrete_cliffwalking.py      # Training example (CliffWalking-v0)
+├── continuous_pendulum.py       # Training example (Pendulum-v1)
+├── continuous_bipedalwalker.py  # Training example (BipedalWalker-v3)
 ├── eval_cartpole.py              # Checkpoint evaluation (CartPole)
-└── eval_pendulum.py              # Checkpoint evaluation (Pendulum)
+├── eval_pendulum.py              # Checkpoint evaluation (Pendulum)
+├── eval_lunarlander.py           # Checkpoint evaluation (LunarLander)
+└── eval_bipedalwalker.py        # Checkpoint evaluation (BipedalWalker)
 ```
 
 ## Key Implementation Details
@@ -40,12 +46,14 @@ examples/
 
 ### Agent Training (`agents.py`)
 
-- **Observation normalization is OPTIONAL** — disabled by default for stability
+- **Observation normalization is OPTIONAL** — agent constructors default to enabled; examples may disable it
   - When `normalize_observations=False`, `obs_normalizer` is `None`
   - All `act()`, `act_deterministic()`, `save()`, `load()`, `train()` methods must guard against `None`
-- **`load(model_path)`** — normalizer_path defaults to `None`; only loads normalizer if `obs_normalizer is not None`
+- **`load(model_path, normalizer_path)`** — provide a normalizer path when observation normalization is enabled; non-normalized agents only load model weights
 - GAE computation in `_compute_gae()`: supports both single-env `[T]` and multi-env `[T, B]` shapes
-- Trajectory transitions store both `terminated` and `truncated`; value bootstrapping stops only on termination, while GAE recursion stops on either episode boundary
+- Every stored transition has the shape `(state, action, reward, log_prob, next_state, terminated, truncated)`. Both end flags are required.
+- GAE uses separate masks: value bootstrapping stops only on termination, while GAE recursion stops on termination or truncation.
+- For auto-reset vector environments, the rollout collector must store the final observation as `next_state` on truncation (and should use final observations for all ended environments). The library does not extract final observations from vector `info`.
 - Advantage normalization: `(adv - mean) / (std + 1e-8)` before training
 - Gradient clipping: `max_norm=0.5` on every step
 
@@ -71,33 +79,60 @@ examples/
 
 ## Default Hyperparameters (Performant)
 
-These are the tuned defaults based on reference implementation comparison:
+These are the agent constructor defaults; examples may override them:
 
 | Param | Discrete | Continuous |
 |-------|----------|------------|
-| Hidden units | 256 | 256 |
-| Training epochs | 10 | 10 |
-| Trajectory size | 512 | 512 |
-| Normalize obs | **False** | **False** |
+| Hidden units | 64, 64 | 64, 64 |
+| Training epochs | 4 | 4 |
+| Trajectory size | 2048 | 2048 |
+| Normalize observations | **True** | **True** |
 | Batch size | 64 | 64 |
-| Entropy coef | 0.001 | 0.01 |
-| Critic coef | 0.5 | 0.5 |
+| Entropy coefficient | 0.001 | 0.01 |
+| Critic coefficient | 0.5 | 0.5 |
+| Learning rate | 3e-4 | 3e-4 |
+| Gamma / GAE lambda | 0.99 / 0.95 | 0.99 / 0.95 |
+| PPO clip epsilon | 0.2 | 0.2 |
 
 ## Common Patterns
 
-### Training Loop
+### Training Loop and Transition Semantics
+
+Pass both Gymnasium end flags to `store()`. `next_state` must be the observation immediately after the action; for vector environments using auto-reset, the client must take the final observation from `info` when appropriate.
+
 ```python
 for episode in range(max_episodes):
     state, _ = env.reset()
+    done = False
     while not done:
-        action, log_prob = agent.act(state)
-        next_state, reward, terminated, truncated, _ = env.step(...)
-        agent.store((state, action, reward, log_prob, next_state, terminated, truncated))
+        if isinstance(agent, ContinuousPPOAgent):
+            action, log_prob, raw_action = agent.act(state)
+            scaled_action = action.cpu().numpy()
+            env_action = env.action_space.low + (
+                (scaled_action + 1.0) * 0.5
+                * (env.action_space.high - env.action_space.low)
+            )
+            stored_action = raw_action.cpu().numpy()
+        else:
+            action, log_prob = agent.act(state)
+            env_action = action.item()
+            stored_action = action.item()
+        next_state, reward, terminated, truncated, info = env.step(env_action)
+        done = terminated or truncated
+        agent.store((
+            state, stored_action, reward, log_prob.item(), next_state,
+            terminated, truncated,
+        ))
         state = next_state
-    if len(agent.trajectory) >= agent._trajectory_size:
-        agent.train()  # Uses defaults if not specified
+    if len(agent.trajectory) >= trajectory_size:
+        agent.train()
         agent.clear()
 ```
+
+- `terminated=True`: do not bootstrap the value target; stop GAE recursion.
+- `truncated=True`: bootstrap from the supplied final `next_state`; stop GAE recursion.
+- If both are true, termination takes precedence for bootstrapping.
+- For discrete PPO, store the sampled action. For continuous PPO, store `raw_action` returned by `act()` (not the squashed environment action).
 
 ### Checkpoint Save/Load
 ```python
