@@ -99,6 +99,55 @@ def test_continuous_agent():
     print("  ContinuousPPOAgent: OK\n")
 
 
+def test_mixed_device():
+    print("=== Testing mixed device ===")
+    if not torch.cuda.is_available():
+        try:
+            ContinuousPPOAgent(state_dim=3, action_dim=1, device="mixed")
+        except RuntimeError as error:
+            assert "requires CUDA" in str(error)
+        else:
+            raise AssertionError("Mixed device should require CUDA")
+
+    with patch("torch.cuda.is_available", return_value=True):
+        agent = ContinuousPPOAgent(state_dim=3, action_dim=1, device="mixed")
+
+    assert agent.device.type == "cuda"
+    assert agent.inference_device.type == "cpu"
+    assert next(agent.network.parameters()).device.type == "cpu"
+    assert agent.obs_normalizer.mean.device.type == "cpu"
+
+    state = np.random.randn(3).astype(np.float32)
+    action, log_prob, raw_action = agent.act(state)
+    deterministic_action = agent.act_deterministic(state)[0]
+    assert action.device.type == "cpu"
+    assert log_prob.device.type == "cpu"
+    assert raw_action.device.type == "cpu"
+    assert deterministic_action.device.type == "cpu"
+
+    if torch.cuda.is_available():
+        training_devices = []
+        agent.network.register_forward_hook(
+            lambda _module, inputs, _output: training_devices.append(
+                inputs[0].device.type
+            )
+        )
+        for _ in range(4):
+            state = np.random.randn(3).astype(np.float32)
+            next_state = np.random.randn(3).astype(np.float32)
+            _, log_prob, raw_action = agent.act(state)
+            agent.store(
+                (state, raw_action.numpy(), 1.0, log_prob.item(), next_state, False, False)
+            )
+
+        agent.train(num_epochs=1, batch_size=4, verbose=False)
+        assert training_devices and set(training_devices) == {"cuda"}
+        assert next(agent.network.parameters()).device.type == "cpu"
+        assert agent.obs_normalizer.mean.device.type == "cpu"
+
+    print("  Mixed device: OK\n")
+
+
 def test_discrete_agent_multi_env():
     print("=== Testing DiscretePPOAgent (multi-env) ===")
     num_envs = 4
@@ -382,6 +431,7 @@ if __name__ == "__main__":
     test_continuous_network()
     test_discrete_agent()
     test_continuous_agent()
+    test_mixed_device()
     test_discrete_agent_multi_env()
     test_continuous_agent_multi_env()
     test_continuous_training_and_inference_shapes()

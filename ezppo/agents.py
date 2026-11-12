@@ -42,7 +42,14 @@ class BasePPOAgent:
         self.critic_coef = critic_coef
         self.entropy_coef = entropy_coef
         self.lr = lr
-        self.device = torch.device(device)
+        if device == "mixed":
+            if not torch.cuda.is_available():
+                raise RuntimeError("device='mixed' requires CUDA to be available")
+            self.device = torch.device("cuda")
+            self.inference_device = torch.device("cpu")
+        else:
+            self.device = torch.device(device)
+            self.inference_device = self.device
 
         self.normalize_observations = normalize_observations
         self.default_num_epochs = default_num_epochs
@@ -51,11 +58,11 @@ class BasePPOAgent:
         # Set up observation normalizer (optional)
         if self.normalize_observations:
             self.obs_normalizer = RunningNormalizer(network.input_dim)
-            self.obs_normalizer.to(self.device)
+            self.obs_normalizer.to(self.inference_device)
         else:
             self.obs_normalizer = None
 
-        self.network.to(self.device)
+        self.network.to(self.inference_device)
 
     def store(self, packet: tuple) -> None:
         """Store (state, action, reward, log_prob, next_state, terminated, truncated)."""
@@ -120,6 +127,10 @@ class BasePPOAgent:
 
         num_epochs = num_epochs if num_epochs is not None else self.default_num_epochs
         batch_size = batch_size if batch_size is not None else self.default_batch_size
+
+        self.network.to(self.device)
+        if self.obs_normalizer is not None:
+            self.obs_normalizer.to(self.device)
 
         # Unpack trajectory
         states, actions, rewards, old_log_probs, next_states, terminateds, truncateds = zip(
@@ -244,12 +255,12 @@ class BasePPOAgent:
 
         # Update observation normalizer (if enabled)
         if self.obs_normalizer is not None:
-            self.obs_normalizer.update(states.cpu().detach())
+            self.obs_normalizer.update(states.detach())
 
-        # Move back to the agent's device
-        self.network.to(self.device)
+        # Restore the inference device after training.
+        self.network.to(self.inference_device)
         if self.obs_normalizer is not None:
-            self.obs_normalizer.to(self.device)
+            self.obs_normalizer.to(self.inference_device)
 
         # Log
         if num_updates > 0 and verbose:
@@ -274,9 +285,9 @@ class BasePPOAgent:
         self.network.load_state_dict(torch.load(model_path, weights_only=True))
         if self.obs_normalizer is not None:
             self.obs_normalizer.load(normalizer_path)
-        self.network.to(self.device)
+        self.network.to(self.inference_device)
         if self.obs_normalizer is not None:
-            self.obs_normalizer.to(self.device)
+            self.obs_normalizer.to(self.inference_device)
 
 
 class DiscretePPOAgent(BasePPOAgent):
@@ -346,9 +357,9 @@ class DiscretePPOAgent(BasePPOAgent):
                 f"Expected {self._num_envs} states, got {state.shape[0]}"
             )
         if self.normalize_observations:
-            state = self.obs_normalizer.normalize(state).to(self.device)
+            state = self.obs_normalizer.normalize(state).to(self.inference_device)
         else:
-            state = state.to(self.device)
+            state = state.to(self.inference_device)
 
         logits = self.network(state)
         dist = Categorical(logits=logits)
@@ -376,9 +387,9 @@ class DiscretePPOAgent(BasePPOAgent):
                 f"Expected {self._num_envs} states, got {state.shape[0]}"
             )
         if self.normalize_observations:
-            state = self.obs_normalizer.normalize(state).to(self.device)
+            state = self.obs_normalizer.normalize(state).to(self.inference_device)
         else:
-            state = state.to(self.device)
+            state = state.to(self.inference_device)
 
         logits = self.network(state)
         action = logits.argmax(dim=-1)
@@ -471,9 +482,9 @@ class ContinuousPPOAgent(BasePPOAgent):
                 f"Expected {self._num_envs} states, got {state.shape[0]}"
             )
         if self.normalize_observations:
-            state = self.obs_normalizer.normalize(state).to(self.device)
+            state = self.obs_normalizer.normalize(state).to(self.inference_device)
         else:
-            state = state.to(self.device)
+            state = state.to(self.inference_device)
 
         mean, log_std = self.network(state)
         log_std = torch.clamp(log_std, -5, 2)
@@ -513,15 +524,15 @@ class ContinuousPPOAgent(BasePPOAgent):
                 f"Expected {self._num_envs} states, got {state.shape[0]}"
             )
         if self.normalize_observations:
-            state = self.obs_normalizer.normalize(state).to(self.device)
+            state = self.obs_normalizer.normalize(state).to(self.inference_device)
         else:
-            state = state.to(self.device)
+            state = state.to(self.inference_device)
 
         mean, log_std = self.network(state)
         action = torch.tanh(mean)
 
-        log_prob = torch.zeros(mean.shape[0], device=self.device)
-        raw_action = torch.zeros(mean.shape[0], device=self.device)
+        log_prob = torch.zeros(mean.shape[0], device=mean.device)
+        raw_action = torch.zeros(mean.shape[0], device=mean.device)
 
         if self._num_envs == 1:
             return action.squeeze(0).cpu().detach(), \

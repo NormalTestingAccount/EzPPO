@@ -49,7 +49,7 @@ def main():
         entropy_coef=0.01,
         num_envs=16,
         trajectory_size=2048,
-        device="cpu",
+        device="mixed",
         normalize_observations=False,
         default_num_epochs=3,
         default_batch_size=64

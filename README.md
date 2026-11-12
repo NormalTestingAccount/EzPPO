@@ -250,6 +250,8 @@ for episode in range(5):
 
 ## API summary
 
+- Set `device="mixed"` to run `act()` and `act_deterministic()` on CPU and
+  training on CUDA; this mode requires CUDA to be available.
 - `DiscretePPOAgent.act(state)` returns `(action, log_prob)`.
 - `ContinuousPPOAgent.act(state)` returns `(action, log_prob, raw_action)`.
 - For continuous PPO, pass the squashed `action` to the environment and store
