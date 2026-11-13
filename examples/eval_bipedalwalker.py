@@ -52,7 +52,7 @@ def main():
         default_batch_size=128
     )
 
-    # Load checkpoint — normalizer path only needed if normalization was enabled during training
+    # Load the checkpoint directory; the normalizer is included when enabled.
     agent.load(args.checkpoint)
     print(f"Loaded checkpoint from: {args.checkpoint}\n")
 

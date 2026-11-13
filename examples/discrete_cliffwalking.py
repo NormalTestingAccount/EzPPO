@@ -86,7 +86,7 @@ def main():
             print(f"Episode {episode+1}/{max_episodes} | Reward: {total_reward:.1f} | Best: {best_reward:.1f}")
 
     # Save checkpoint
-    agent.save("checkpoints/cliffwalking_ppo", None)
+    agent.save("checkpoints/cliffwalking_ppo")
     print("Checkpoint saved!")
 
     # Evaluation

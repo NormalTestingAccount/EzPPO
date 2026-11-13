@@ -49,7 +49,7 @@ examples/
 - **Observation normalization is OPTIONAL** — agent constructors default to enabled; examples may disable it
   - When `normalize_observations=False`, `obs_normalizer` is `None`
   - All `act()`, `act_deterministic()`, `save()`, `load()`, `train()` methods must guard against `None`
-- **`load(model_path, normalizer_path)`** — provide a normalizer path when observation normalization is enabled; non-normalized agents only load model weights
+- **`load(checkpoint_path, load_optimizer=True)`** — load `model` and `optim` from a checkpoint directory, plus `norm.npy` when observation normalization is enabled
 - GAE computation in `_compute_gae()`: supports both single-env `[T]` and multi-env `[T, B]` shapes
 - Every stored transition has the shape `(state, action, reward, log_prob, next_state, terminated, truncated)`. Both end flags are required.
 - GAE uses separate masks: value bootstrapping stops only on termination, while GAE recursion stops on termination or truncation.
@@ -136,10 +136,10 @@ for episode in range(max_episodes):
 
 ### Checkpoint Save/Load
 ```python
-# Save (normalizer_path only needed if normalize_observations=True)
+# Save model and optimizer, plus the normalizer when enabled
 agent.save("checkpoints/model_name")
 
-# Load (no normalizer_path needed when disabled)
+# Load model and optimizer, plus the normalizer when enabled
 agent.load("checkpoints/model_name")
 ```
 

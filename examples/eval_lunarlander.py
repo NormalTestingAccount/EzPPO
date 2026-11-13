@@ -41,7 +41,7 @@ def main():
     )
 
     # Save checkpoint
-    agent.load("checkpoints/lunarlander_ppo", None)
+    agent.load("checkpoints/lunarlander_ppo")
     print("Checkpoint loaded!")
 
     # Evaluation

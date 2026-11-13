@@ -73,7 +73,7 @@ def main():
         if total_reward > best_reward:
             best_reward = total_reward
 
-            agent.save("checkpoints/lunarlander_ppo", None)
+            agent.save("checkpoints/lunarlander_ppo")
             print("Checkpoint saved!")
 
         if (episode + 1) % 100 == 0:
@@ -81,7 +81,7 @@ def main():
 
     if total_reward > best_reward:
         # Save checkpoint
-        agent.save("checkpoints/lunarlander_ppo", None)
+        agent.save("checkpoints/lunarlander_ppo")
         print("Checkpoint saved!")
 
     # Evaluation

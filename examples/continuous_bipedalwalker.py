@@ -55,7 +55,7 @@ def main():
         default_batch_size=64
     )
 
-    agent.load("checkpoints/bipedalwalker_ppo", None)
+    agent.load("checkpoints/bipedalwalker_ppo")
     
     # Training loop
     max_episodes = 5000
@@ -83,7 +83,7 @@ def main():
             agent.clear()
 
         if total_reward > best_reward:
-            agent.save("checkpoints/bipedalwalker_ppo", None)
+            agent.save("checkpoints/bipedalwalker_ppo")
             print("New best saved!")
             best_reward = total_reward
 
@@ -91,7 +91,7 @@ def main():
         print(f"Episode {episode+1}/{max_episodes} | Reward: {total_reward:.1f} | Best: {best_reward:.1f}")
 
     # Save checkpoint
-    #agent.save("checkpoints/bipedalwalker_ppo", None)
+    #agent.save("checkpoints/bipedalwalker_ppo")
     #print("Checkpoint saved!")
 
     # Evaluation

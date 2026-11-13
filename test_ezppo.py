@@ -2,9 +2,13 @@
 Quick test script to verify EzPPO works correctly.
 """
 
-import torch
-import numpy as np
+import os
+import tempfile
 from unittest.mock import patch
+
+import numpy as np
+import torch
+
 from ezppo import DiscretePPO, ContinuousPPO, DiscretePPOAgent, ContinuousPPOAgent
 
 
@@ -425,6 +429,79 @@ def test_gae_bootstrap_and_episode_boundary_masks():
     torch.testing.assert_close(targets, expected_advantages + values)
 
 
+def test_checkpoint_optimizer_round_trip():
+    print("=== Testing checkpoint optimizer round trip ===")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        checkpoint_path = os.path.join(temp_dir, "checkpoint")
+        agent = ContinuousPPOAgent(
+            state_dim=3,
+            action_dim=1,
+            normalize_observations=True,
+            default_num_epochs=1,
+            default_batch_size=4,
+        )
+
+        for _ in range(4):
+            state = np.random.randn(3).astype(np.float32)
+            next_state = np.random.randn(3).astype(np.float32)
+            _, log_prob, raw_action = agent.act(state)
+            agent.store(
+                (state, raw_action.numpy(), 1.0, log_prob.item(), next_state, False, False)
+            )
+        agent.train(num_epochs=1, batch_size=4, verbose=False)
+        agent.save(checkpoint_path)
+
+        assert set(os.listdir(checkpoint_path)) == {"model", "optim", "norm.npy"}
+        restored = ContinuousPPOAgent(
+            state_dim=3,
+            action_dim=1,
+            normalize_observations=True,
+            checkpoint=checkpoint_path,
+        )
+
+        for key, value in agent.network.state_dict().items():
+            torch.testing.assert_close(restored.network.state_dict()[key], value)
+        torch.testing.assert_close(restored.obs_normalizer.mean, agent.obs_normalizer.mean)
+        torch.testing.assert_close(restored.obs_normalizer.var, agent.obs_normalizer.var)
+
+        saved_optimizer = agent.optimizer.state_dict()
+        restored_optimizer = restored.optimizer.state_dict()
+        assert saved_optimizer["param_groups"] == restored_optimizer["param_groups"]
+        assert saved_optimizer["state"].keys() == restored_optimizer["state"].keys()
+        for parameter_id, saved_state in saved_optimizer["state"].items():
+            restored_state = restored_optimizer["state"][parameter_id]
+            assert saved_state.keys() == restored_state.keys()
+            for key, value in saved_state.items():
+                if isinstance(value, torch.Tensor):
+                    torch.testing.assert_close(restored_state[key], value)
+                else:
+                    assert restored_state[key] == value
+
+        restored.trajectory = list(agent.trajectory)
+        random_state = np.random.get_state()
+        np.random.seed(0)
+        agent.train(num_epochs=1, batch_size=4, verbose=False)
+        np.random.seed(0)
+        restored.train(num_epochs=1, batch_size=4, verbose=False)
+        np.random.set_state(random_state)
+        for key, value in agent.network.state_dict().items():
+            torch.testing.assert_close(restored.network.state_dict()[key], value)
+
+        agent.save(checkpoint_path, save_optimizer=False)
+        assert set(os.listdir(checkpoint_path)) == {"model", "norm.npy"}
+        restored.load(checkpoint_path, load_optimizer=False)
+
+        model_only_path = os.path.join(temp_dir, "model_only")
+        model_only_agent = ContinuousPPOAgent(
+            state_dim=3,
+            action_dim=1,
+            normalize_observations=False,
+        )
+        model_only_agent.save(model_only_path, save_optimizer=False)
+        assert set(os.listdir(model_only_path)) == {"model"}
+        model_only_agent.load(model_only_path, load_optimizer=False)
+
+
 if __name__ == "__main__":
     print("EzPPO Test Suite\n")
     test_discrete_network()
@@ -436,4 +513,5 @@ if __name__ == "__main__":
     test_continuous_agent_multi_env()
     test_continuous_training_and_inference_shapes()
     test_gae_bootstrap_and_episode_boundary_masks()
+    test_checkpoint_optimizer_round_trip()
     print("All tests passed!")

@@ -10,6 +10,8 @@ Both agents share a common base class with:
 - Save/load checkpointing
 """
 
+import os
+
 import torch
 import numpy as np
 import torch.optim as optim
@@ -268,26 +270,51 @@ class BasePPOAgent:
                   f"Critic: {avg_critic_loss/num_updates:.4f} | "
                   f"Entropy: {avg_entropy/num_updates:.4f}")
 
-    def save(self, model_path: str, normalizer_path: str = None) -> None:
-        """Save checkpoint."""
+    def save(self, checkpoint_path: str, save_optimizer: bool = True) -> None:
+        """Save model, optional optimizer, and optional observation normalizer."""
+        os.makedirs(checkpoint_path, exist_ok=True)
+        model_path = os.path.join(checkpoint_path, "model")
+        optimizer_path = os.path.join(checkpoint_path, "optim")
+        normalizer_path = os.path.join(checkpoint_path, "norm.npy")
+
         torch.save(self.network.state_dict(), model_path)
+        if save_optimizer:
+            torch.save(self.optimizer.state_dict(), optimizer_path)
+        elif os.path.exists(optimizer_path):
+            os.remove(optimizer_path)
+
         if self.obs_normalizer is not None:
             self.obs_normalizer.save(normalizer_path)
+        elif os.path.exists(normalizer_path):
+            os.remove(normalizer_path)
 
-    def load(self, model_path: str, normalizer_path: str | None = None) -> None:
-        """Load checkpoint.
+    def load(self, checkpoint_path: str, load_optimizer: bool = True) -> None:
+        """Load a checkpoint directory.
         
         Args:
-            model_path: Path to the network state dict file.
-            normalizer_path: Path to the normalizer file (only used if
-                             normalize_observations=True; defaults to None).
+            checkpoint_path: Path to the checkpoint directory.
+            load_optimizer: Whether to restore optimizer state.
         """
-        self.network.load_state_dict(torch.load(model_path, weights_only=True))
-        if self.obs_normalizer is not None:
-            self.obs_normalizer.load(normalizer_path)
+        model_path = os.path.join(checkpoint_path, "model")
+        optimizer_path = os.path.join(checkpoint_path, "optim")
+        normalizer_path = os.path.join(checkpoint_path, "norm.npy")
+
         self.network.to(self.inference_device)
+        self.network.load_state_dict(
+            torch.load(model_path, map_location=self.inference_device, weights_only=True)
+        )
         if self.obs_normalizer is not None:
             self.obs_normalizer.to(self.inference_device)
+            self.obs_normalizer.load(normalizer_path)
+        if load_optimizer:
+            optimizer_state = torch.load(
+                optimizer_path, map_location=self.device, weights_only=True
+            )
+            self.network.to(self.device)
+            try:
+                self.optimizer.load_state_dict(optimizer_state)
+            finally:
+                self.network.to(self.inference_device)
 
 
 class DiscretePPOAgent(BasePPOAgent):
@@ -327,10 +354,7 @@ class DiscretePPOAgent(BasePPOAgent):
                          default_batch_size)
 
         if checkpoint:
-            if self.obs_normalizer is not None:
-                self.load(checkpoint + ".pth", checkpoint + "_norm.npy")
-            else:
-                self.load(checkpoint + ".pth", None)
+            self.load(checkpoint)
 
     def act(self, state) -> tuple:
         """
@@ -451,10 +475,7 @@ class ContinuousPPOAgent(BasePPOAgent):
                          default_batch_size)
 
         if checkpoint:
-            if self.obs_normalizer is not None:
-                self.load(checkpoint + ".pth", checkpoint + "_norm.npy")
-            else:
-                self.load(checkpoint + ".pth", None)
+            self.load(checkpoint)
 
     def act(self, state) -> tuple:
         """

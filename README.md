@@ -51,7 +51,7 @@ for episode in range(1000):
     agent.train()
     agent.clear()
 
-agent.save("checkpoints/cartpole_ppo", "checkpoints/cartpole_ppo_norm.npy")
+agent.save("checkpoints/cartpole_ppo")
 ```
 
 ### Continuous actions
@@ -86,7 +86,7 @@ for episode in range(1000):
     agent.train()
     agent.clear()
 
-agent.save("checkpoints/pendulum_ppo", "checkpoints/pendulum_ppo_norm.npy")
+agent.save("checkpoints/pendulum_ppo")
 ```
 
 Store both `terminated` and `truncated` in every transition. PPO bootstraps
@@ -203,7 +203,7 @@ agent = DiscretePPOAgent(
     state_dim=env.observation_space.shape[0],
     action_dim=env.action_space.n,
 )
-agent.load("checkpoints/cartpole_ppo", "checkpoints/cartpole_ppo_norm.npy")
+agent.load("checkpoints/cartpole_ppo")
 
 for episode in range(5):
     state, _ = env.reset()
@@ -230,7 +230,7 @@ agent = ContinuousPPOAgent(
     state_dim=env.observation_space.shape[0],
     action_dim=env.action_space.shape[0],
 )
-agent.load("checkpoints/pendulum_ppo", "checkpoints/pendulum_ppo_norm.npy")
+agent.load("checkpoints/pendulum_ppo")
 
 for episode in range(5):
     state, _ = env.reset()
@@ -260,8 +260,11 @@ for episode in range(5):
   `(state, action, reward, log_prob, next_state, terminated, truncated)`.
 - `agent.train()` updates from stored transitions. Call `agent.clear()` before
   collecting the next rollout.
-- `agent.save(model_path)` and `agent.load(model_path)` save and load weights.
-  Supply a normalizer path to both when observation normalization is enabled.
+- `agent.save(checkpoint_path)` and `agent.load(checkpoint_path)` use a
+  checkpoint directory containing `model`, optional `optim`, and (when
+  observation normalization is enabled) `norm.npy`. Optimizer state is saved
+  and loaded by default; pass `save_optimizer=False` or `load_optimizer=False`
+  to skip it.
 
 ## License
 
